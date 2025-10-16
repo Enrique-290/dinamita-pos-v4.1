@@ -451,41 +451,18 @@ const Inventario={
   },
   del(sku){if(!confirm('¿Eliminar producto?'))return; state.products=state.products.filter(x=>x.sku!==sku); DB.save(state); this.renderTabla();},
   
-  cancel(folio){
-    if(!confirm('¿Cancelar la venta '+folio+'?\nLos productos se regresarán al inventario.')) return;
-    const s = state.sales.find(x=>x.folio===folio);
-    if(!s) return alert('Venta no encontrada');
-    if(s.estado==='cancelada') return alert('La venta ya está cancelada.');
-    // Restituye stock por cada producto
-    (s.items||[]).forEach(i=>{
-      if(!i._isService){
-        const p = state.products.find(x=>x.sku===i.sku);
-        if(p){
-          p.stock = (p.stock||0) + (i.qty||0);
-          p.movs = p.movs||[];
-          p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+i.qty, stockFinal:p.stock, ref:folio});
-        }
-      }
-    });
-    s.estado='cancelada';
-    s.cancelInfo = {fecha:new Date().toISOString(), usuario:'admin', motivo:''};
-    DB.save(state);
-    Dashboard.render(); Inventario.renderTabla(); Historial.renderTabla();
-    alert('Venta cancelada y stock restituido.');
-  },
-
-  entrada(sku){
-    const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
-    const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
-    const qty = parseInt(val||'0',10);
-    if(!qty || qty<=0) return;
-    p.stock = (p.stock||0) + qty;
-    p.movs = p.movs||[];
-    p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
-    DB.save(state);
-    this.renderTabla();
-    alert('Stock actualizado: '+p.stock);
-  },
+entrada(sku){
+  const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
+  const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
+  const qty = parseInt(val||'0',10);
+  if(!qty || qty<=0) return;
+  p.stock = (p.stock||0) + qty;
+  p.movs = p.movs||[];
+  p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
+  DB.save(state);
+  this.renderTabla();
+  alert('Stock actualizado: '+p.stock);
+},
 exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
 };
 
@@ -533,43 +510,7 @@ const Clientes={
     }).join('');
     document.getElementById('cliTabla').innerHTML=`<table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Cert. médico</th><th>Entrena</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6">Sin clientes</td></tr>'}</tbody></table>`;
   },
-  
-  cancel(folio){
-    if(!confirm('¿Cancelar la venta '+folio+'?\nLos productos se regresarán al inventario.')) return;
-    const s = state.sales.find(x=>x.folio===folio);
-    if(!s) return alert('Venta no encontrada');
-    if(s.estado==='cancelada') return alert('La venta ya está cancelada.');
-    // Restituye stock por cada producto
-    (s.items||[]).forEach(i=>{
-      if(!i._isService){
-        const p = state.products.find(x=>x.sku===i.sku);
-        if(p){
-          p.stock = (p.stock||0) + (i.qty||0);
-          p.movs = p.movs||[];
-          p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+i.qty, stockFinal:p.stock, ref:folio});
-        }
-      }
-    });
-    s.estado='cancelada';
-    s.cancelInfo = {fecha:new Date().toISOString(), usuario:'admin', motivo:''};
-    DB.save(state);
-    Dashboard.render(); Inventario.renderTabla(); Historial.renderTabla();
-    alert('Venta cancelada y stock restituido.');
-  },
-
-  entrada(sku){
-    const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
-    const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
-    const qty = parseInt(val||'0',10);
-    if(!qty || qty<=0) return;
-    p.stock = (p.stock||0) + qty;
-    p.movs = p.movs||[];
-    p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
-    DB.save(state);
-    this.renderTabla();
-    alert('Stock actualizado: '+p.stock);
-  },
-exportCSV(){const rows=[['ID','Nombre','Telefono','Email','CertificadoMedico','EntrenaSolo']].concat(state.customers.map(c=>[c.id,c.nombre||'',c.tel||'',c.email||'',c.certificadoMedico?'SI':'NO',c.entrenaSolo?'SOLO':'ACOMPAÑADO']));downloadCSV('clientes.csv',rows);}
+  exportCSV(){const rows=[['ID','Nombre','Telefono','Email','CertificadoMedico','EntrenaSolo']].concat(state.customers.map(c=>[c.id,c.nombre||'',c.tel||'',c.email||'',c.certificadoMedico?'SI':'NO',c.entrenaSolo?'SOLO':'ACOMPAÑADO']));downloadCSV('clientes.csv',rows);}
 };
 
 const Membresias={
@@ -714,43 +655,7 @@ const Membresias={
     Ventas.carrito=[{_isService:true,nombre:'Membresía '+m.tipo,precio:tinfo.precio,qty:1, mem:{tipo:m.tipo,inicio:m.inicio,fin:m.fin}}];
     Ventas.renderCarrito();
   },
-  
-  cancel(folio){
-    if(!confirm('¿Cancelar la venta '+folio+'?\nLos productos se regresarán al inventario.')) return;
-    const s = state.sales.find(x=>x.folio===folio);
-    if(!s) return alert('Venta no encontrada');
-    if(s.estado==='cancelada') return alert('La venta ya está cancelada.');
-    // Restituye stock por cada producto
-    (s.items||[]).forEach(i=>{
-      if(!i._isService){
-        const p = state.products.find(x=>x.sku===i.sku);
-        if(p){
-          p.stock = (p.stock||0) + (i.qty||0);
-          p.movs = p.movs||[];
-          p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+i.qty, stockFinal:p.stock, ref:folio});
-        }
-      }
-    });
-    s.estado='cancelada';
-    s.cancelInfo = {fecha:new Date().toISOString(), usuario:'admin', motivo:''};
-    DB.save(state);
-    Dashboard.render(); Inventario.renderTabla(); Historial.renderTabla();
-    alert('Venta cancelada y stock restituido.');
-  },
-
-  entrada(sku){
-    const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
-    const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
-    const qty = parseInt(val||'0',10);
-    if(!qty || qty<=0) return;
-    p.stock = (p.stock||0) + qty;
-    p.movs = p.movs||[];
-    p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
-    DB.save(state);
-    this.renderTabla();
-    alert('Stock actualizado: '+p.stock);
-  },
-exportCSV(){
+  exportCSV(){
     const rows=[['ID','Cliente','Tipo','Inicio','Fin','Estado','Notas']].concat(state.memberships.map(m=>{
       const status=this.status(m);
       return [m.id,(state.customers.find(c=>c.id===m.cliente)?.nombre||''),m.tipo,m.inicio,m.fin,status,m.notas||''];
@@ -809,52 +714,15 @@ const Historial={
       if(clienteQ&&!cliente.includes(clienteQ))return false;
       if(prodQ&&!s.items.map(i=>i.nombre).join(' ').toLowerCase().includes(prodQ))return false;
       if(pagoQ && ((s.pago?.tipo||'efectivo').toLowerCase()!==pagoQ)) return false;
-      if(s.estado==='cancelada') return true;
       return true;
     }).map(s=>{
       const cli=state.customers.find(c=>c.id===s.cliente)?.nombre||'';
       const itemsStr=s.items.map(i=>`${i.nombre} x${i.qty}`).join(', ');
-      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td><td>${money(s.total)}</td><td><button class='btn small' onclick=\"Tickets.renderByFolio('${s.folio}')\">🖨️ Reimprimir</button></td></tr>`;
+      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td>`+`<td>${money(s.total)}</td><td>${(s.pago?.tipo||'efectivo')}</td><td>${s.estado==='cancelada'?'Cancelada':'Completada'}</td><td>`+(s.estado==='cancelada' ? `<button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` : `<button class='btn small' style="background:#d00;color:#fff" onclick="Historial.cancel('${s.folio}')">✖️ Cancelar</button> <button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` )+`</td></tr>`;
     }).join('');
     document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8">Sin ventas</td></tr>'}</tbody></table>`;
   },
-  
-  cancel(folio){
-    if(!confirm('¿Cancelar la venta '+folio+'?\nLos productos se regresarán al inventario.')) return;
-    const s = state.sales.find(x=>x.folio===folio);
-    if(!s) return alert('Venta no encontrada');
-    if(s.estado==='cancelada') return alert('La venta ya está cancelada.');
-    // Restituye stock por cada producto
-    (s.items||[]).forEach(i=>{
-      if(!i._isService){
-        const p = state.products.find(x=>x.sku===i.sku);
-        if(p){
-          p.stock = (p.stock||0) + (i.qty||0);
-          p.movs = p.movs||[];
-          p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+i.qty, stockFinal:p.stock, ref:folio});
-        }
-      }
-    });
-    s.estado='cancelada';
-    s.cancelInfo = {fecha:new Date().toISOString(), usuario:'admin', motivo:''};
-    DB.save(state);
-    Dashboard.render(); Inventario.renderTabla(); Historial.renderTabla();
-    alert('Venta cancelada y stock restituido.');
-  },
-
-  entrada(sku){
-    const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
-    const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
-    const qty = parseInt(val||'0',10);
-    if(!qty || qty<=0) return;
-    p.stock = (p.stock||0) + qty;
-    p.movs = p.movs||[];
-    p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
-    DB.save(state);
-    this.renderTabla();
-    alert('Stock actualizado: '+p.stock);
-  },
-exportCSV(){
+  exportCSV(){
     const rows=[['Folio','Fecha','Cliente','Items','Total','IVA','Costo','Ganancia']].concat(state.sales.map(s=>[s.folio,s.fecha,(state.customers.find(c=>c.id===s.cliente)?.nombre||''),s.items.map(i=>`${i.nombre} x${i.qty}`).join('; '),s.total,s.iva,(s.subtotalCosto||0),((s.total-s.iva)-(s.subtotalCosto||0))]));
     downloadCSV('historial_ventas.csv',rows);
   }
@@ -1020,8 +888,7 @@ const Tickets={
     lines.push(padRight('SUBTOTAL',20)+padLeft(money(v.subtotal),12));
     lines.push(padRight('IVA',20)+padLeft(money(v.iva),12));
     lines.push(padRight('TOTAL',20)+padLeft(money(v.total),12));
-    lines.push('Pago con: '+((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase()));
-    lines.push(repeat('-',32));
+    lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));lines.push(repeat('-',32));
     const nota=(v.notas&&v.notas.trim())?v.notas.trim():(state.settings.mensaje||'');
     if(nota)lines.push(nota);
     document.getElementById('ticketBody').textContent=lines.join('\n');
