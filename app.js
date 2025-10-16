@@ -885,28 +885,41 @@ function downloadCSV(filename,rows){
 window.addEventListener('DOMContentLoaded',UI.init);
 
 
-// --- V4.1 super hotfix: robust cancel handlers for mobile ---
+// --- V4.1 hotfix: expose modules globally for mobile onclick ---
+try{ window.Historial = Historial; }catch(e){}
+try{ window.Inventario = Inventario; }catch(e){}
+try{ window.Tickets = Tickets; }catch(e){}
+// --- V4.1 hotfix: delegation for cancel buttons ---
 (function(){
-  window.__cancelBtn = function(folio){
-    try{
-      if(window.Historial && typeof Historial.cancel==='function'){
-        Historial.cancel(folio);
-      }else{
-        alert('No se pudo acceder a Historial.cancel. Recarga la página con ?v=41h e inténtalo de nuevo.');
+  function bindDelegation(){
+    var cont = document.getElementById('histTabla');
+    if(!cont || cont.dataset.cancelBound) return;
+    cont.addEventListener('click', function(e){
+      var el = e.target;
+      if(el && el.closest){
+        var btn = el.closest('button');
+        if(btn && (btn.dataset && btn.dataset.cancel==='1')){
+          var folio = btn.getAttribute('data-folio');
+          if(folio && window.Historial && typeof window.Historial.cancel==='function'){
+            window.Historial.cancel(folio);
+          }
+        }
       }
-    }catch(e){
-      alert('Error al cancelar: '+(e&&e.message?e.message:e));
-    }
-  };
-  function handle(target){
-    var btn = target && target.closest ? target.closest('button') : null;
-    if(!btn) return;
-    var folio = btn.getAttribute('data-folio') || btn.getAttribute('data-folio-id');
-    if((btn.dataset && btn.dataset.cancel==='1') || (btn.textContent && btn.textContent.trim().toLowerCase().includes('cancelar'))){
-      if(folio){ window.__cancelBtn(folio); }
-    }
+    }, true);
+    cont.dataset.cancelBound='1';
   }
-  document.addEventListener('click', function(e){ handle(e.target); }, true);
-  document.addEventListener('touchend', function(e){ handle(e.target); }, true);
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', bindDelegation);
+  }else{
+    bindDelegation();
+  }
+  // rebind after table re-render
+  var _oldRender = Historial.renderTabla;
+  if(typeof _oldRender === 'function'){
+    Historial.renderTabla = function(){
+      _oldRender.apply(Historial, arguments);
+      bindDelegation();
+    };
+  }
 })();
-// --- end super hotfix ---
+// --- end hotfix ---
