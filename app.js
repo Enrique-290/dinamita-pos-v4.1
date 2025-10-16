@@ -1,7 +1,7 @@
 
 // Simple store
 const STORAGE_KEY='dinamita_pos_v4';
-const SCHEMA_VERSION=7;
+const SCHEMA_VERSION=8;
 
 const DEFAULT_SETTINGS = {
   iva: 0, // default 0
@@ -41,10 +41,14 @@ const DB={
       try{
         let d=JSON.parse(raw);
         if(!d.schemaVersion||d.schemaVersion<SCHEMA_VERSION)d=this.migrate(d);
+        /* normalize V4.1 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
         return d;
       }catch(e){}
     }
-    let d=this.seed(); this.save(d); return d;
+    let d=this.seed(); this.save(d); /* normalize V4.1 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
+        return d;
   },
   save(d){ localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); },
   seed(){
@@ -70,7 +74,9 @@ const DB={
     d.customers=(d.customers||[]).map(c=>({certificadoMedico:false,entrenaSolo:false,...c}));
     d.memberships=d.memberships||[];
     d.sales=(d.sales||[]).map(s=>({...s,subtotalCosto:s.subtotalCosto??(s.items||[]).reduce((a,i)=>a+(i.costo||0)*(i.qty||0),0)}));
-    return d;
+    /* normalize V4.1 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
+        return d;
   }
 };
 
@@ -160,14 +166,14 @@ const Dashboard={
   _filterSales(){
     const ini=document.getElementById('dashIni').value||'0000-01-01';
     const fin=document.getElementById('dashFin').value||'9999-12-31';
-    return state.sales.filter(s=>{
+    return state.sales.filter(s=>{ if(s.estado==='cancelada') return false; if(s.estado==='cancelada') return false;
       const f=s.fecha.slice(0,10);
       return f>=ini && f<=fin;
     });
   },
   render(){
     const today=new Date().toISOString().slice(0,10);
-    const ventasHoy=state.sales.filter(s=>s.fecha.slice(0,10)===today);
+    const ventasHoy=state.sales.filter(s=>s.fecha.slice(0,10)===today && s.estado!=='cancelada');
     const totalHoy=ventasHoy.reduce((a,s)=>a+s.total,0);
     const utilidad=ventasHoy.reduce((a,s)=>a+((s.total-s.iva)-(s.subtotalCosto||0)),0);
     document.getElementById('kpiVentasHoy').textContent=money(totalHoy);
@@ -384,7 +390,7 @@ const Ventas={
         return {sku:it.sku,nombre:it.nombre,precio:it.precio,costo:prod?.costo||0,qty:it.qty};
       }
     });
-    const venta={folio,fecha:new Date().toISOString(),items,subtotal:totals.subtotal,iva:totals.iva,total:totals.total,cliente,notas:state.settings.mensaje||''};
+    const venta={folio,fecha:new Date().toISOString(),items,subtotal:totals.subtotal,iva:totals.iva,total:totals.total,cliente,notas:state.settings.mensaje||'',pago:{tipo:(document.getElementById('ventaPago')?.value||'efectivo')},estado:'completada'};
     venta.subtotalCosto=items.reduce((a,i)=>a+(i.costo||0)*i.qty,0);
     venta.ganancia=(venta.total-venta.iva)-venta.subtotalCosto;
     state.sales.unshift(venta); DB.save(state);
@@ -444,7 +450,20 @@ const Inventario={
     window.scrollTo({top:0,behavior:'smooth'});
   },
   del(sku){if(!confirm('¿Eliminar producto?'))return; state.products=state.products.filter(x=>x.sku!==sku); DB.save(state); this.renderTabla();},
-  exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
+  
+entrada(sku){
+  const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
+  const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
+  const qty = parseInt(val||'0',10);
+  if(!qty || qty<=0) return;
+  p.stock = (p.stock||0) + qty;
+  p.movs = p.movs||[];
+  p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
+  DB.save(state);
+  this.renderTabla();
+  alert('Stock actualizado: '+p.stock);
+},
+exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
 };
 
 const Clientes={
@@ -685,6 +704,7 @@ const Historial={
     const folio=(document.getElementById('histFolio')?.value||'').toLowerCase();
     const clienteQ=(document.getElementById('histCliente')?.value||'').toLowerCase();
     const prodQ=(document.getElementById('histProducto')?.value||'').toLowerCase();
+    const pagoQ=(document.getElementById('histPago')?.value||'').toLowerCase();
     const rows=state.sales.filter(s=>{
       const f=s.fecha.slice(0,10);
       if(ini&&f<ini)return false;
@@ -693,13 +713,14 @@ const Historial={
       const cliente=(state.customers.find(c=>c.id===s.cliente)?.nombre||'').toLowerCase();
       if(clienteQ&&!cliente.includes(clienteQ))return false;
       if(prodQ&&!s.items.map(i=>i.nombre).join(' ').toLowerCase().includes(prodQ))return false;
+      if(pagoQ && ((s.pago?.tipo||'efectivo').toLowerCase()!==pagoQ)) return false;
       return true;
     }).map(s=>{
       const cli=state.customers.find(c=>c.id===s.cliente)?.nombre||'';
       const itemsStr=s.items.map(i=>`${i.nombre} x${i.qty}`).join(', ');
-      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td><td>${money(s.total)}</td><td><button class='btn small' onclick=\"Tickets.renderByFolio('${s.folio}')\">🖨️ Reimprimir</button></td></tr>`;
+      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td>`+`<td>${money(s.total)}</td><td>${(s.pago?.tipo||'efectivo')}</td><td>${s.estado==='cancelada'?'Cancelada':'Completada'}</td><td>`+(s.estado==='cancelada' ? `<button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` : `<button class='btn small' style="background:#d00;color:#fff" onclick="Historial.cancel('${s.folio}')">✖️ Cancelar</button> <button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` )+`</td></tr>`;
     }).join('');
-    document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6">Sin ventas</td></tr>'}</tbody></table>`;
+    document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8">Sin ventas</td></tr>'}</tbody></table>`;
   },
   exportCSV(){
     const rows=[['Folio','Fecha','Cliente','Items','Total','IVA','Costo','Ganancia']].concat(state.sales.map(s=>[s.folio,s.fecha,(state.customers.find(c=>c.id===s.cliente)?.nombre||''),s.items.map(i=>`${i.nombre} x${i.qty}`).join('; '),s.total,s.iva,(s.subtotalCosto||0),((s.total-s.iva)-(s.subtotalCosto||0))]));
@@ -867,7 +888,8 @@ const Tickets={
     lines.push(padRight('SUBTOTAL',20)+padLeft(money(v.subtotal),12));
     lines.push(padRight('IVA',20)+padLeft(money(v.iva),12));
     lines.push(padRight('TOTAL',20)+padLeft(money(v.total),12));
-    lines.push(repeat('-',32));
+    lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));
+lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));lines.push(repeat('-',32));
     const nota=(v.notas&&v.notas.trim())?v.notas.trim():(state.settings.mensaje||'');
     if(nota)lines.push(nota);
     document.getElementById('ticketBody').textContent=lines.join('\n');
@@ -884,3 +906,138 @@ function downloadCSV(filename,rows){
 }
 
 window.addEventListener('DOMContentLoaded',UI.init);
+
+
+// === Dinamita POS v4.3 — helpers DOM-inject ===
+(function(){
+  try{
+    (state.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; });
+    (state.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; });
+  }catch(e){}
+
+  function ensurePagoUI(){
+    try{
+      const ventasRoot = document.querySelector('[data-section="ventas"]') || document.getElementById('ventas') || document.querySelector('.ventas');
+      if(!ventasRoot || ventasRoot.dataset.pagoReady) return;
+      const target = ventasRoot.querySelector('.panel, .card, form, .box') || ventasRoot;
+      const wrap = document.createElement('div');
+      wrap.style.display='flex'; wrap.style.gap='12px'; wrap.style.alignItems='center'; wrap.style.margin='8px 0 4px 0';
+      wrap.innerHTML = "<label style='font-weight:600'>Pago con</label> \
+      <select id='ventaPago' class='input' style='max-width:220px;padding:6px;border-radius:8px'> \
+        <option value='efectivo' selected>Efectivo</option> \
+        <option value='tarjeta'>Tarjeta</option> \
+        <option value='transferencia'>Transferencia</option> \
+      </select>";
+      const totals = ventasRoot.querySelector('.totales, .total, .sum, .right, [data-role=\"totales\"]');
+      const confirmBtn = Array.from(ventasRoot.querySelectorAll('button')).find(b => (b.textContent||'').toLowerCase().includes('confirmar venta'));
+      if(totals && totals.parentNode){ totals.parentNode.insertBefore(wrap, totals); }
+      else if(confirmBtn && confirmBtn.parentNode){ confirmBtn.parentNode.insertBefore(wrap, confirmBtn); }
+      else { target.insertBefore(wrap, target.firstChild); }
+      const sel = wrap.querySelector('#ventaPago');
+      sel.addEventListener('change', ()=>{ window.__pagoTipo = sel.value; });
+      window.__pagoTipo = sel.value;
+      ventasRoot.dataset.pagoReady='1';
+    }catch(e){}
+  }
+
+  if(!(window.Inventario && typeof Inventario.entrada==='function')){
+    window.Inventario = window.Inventario || {};
+    Inventario.entrada = function(sku){
+      try{
+        const p=(state.products||[]).find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
+        const val=prompt('Cantidad a ingresar para '+p.nombre+':','1');
+        const qty=parseInt(val||'0',10); if(!qty||qty<=0) return;
+        p.stock=(p.stock||0)+qty;
+        p.movs=p.movs||[]; p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
+        DB.save(state);
+        if(Inventario.renderTabla) Inventario.renderTabla();
+        alert('Stock actualizado: '+p.stock);
+      }catch(e){ alert('Error entradas: '+(e&&e.message?e.message:e)); }
+    };
+  }
+  function injectEntradasButtons(){
+    try{
+      const invTable = document.querySelector('#inventario table, [data-section=\"inventario\"] table');
+      if(!invTable) return;
+      invTable.querySelectorAll('tbody tr').forEach(tr=>{
+        const tds=tr.querySelectorAll('td'); if(!tds.length) return;
+        const sku=(tds[0].textContent||'').trim();
+        const acciones=tds[tds.length-1]; if(!acciones || acciones.querySelector('button[data-role=\"entradas\"]')) return;
+        const btn=document.createElement('button'); btn.className='btn small'; btn.style.marginLeft='6px';
+        btn.textContent='➕ Entradas'; btn.setAttribute('data-role','entradas'); btn.onclick=()=>Inventario.entrada(sku);
+        acciones.appendChild(btn);
+      });
+    }catch(e){}
+  }
+
+  if(!(window.Historial && typeof Historial.cancel==='function')){
+    window.Historial = window.Historial || {};
+    Historial.cancel = function(folio){
+      try{
+        const s=(state.sales||[]).find(x=>x.folio===folio);
+        if(!s){ alert('Venta no encontrada'); return; }
+        if(s.estado==='cancelada'){ alert('La venta ya está cancelada.'); return; }
+        if(!confirm('¿Cancelar la venta '+folio+'?\\nLos productos se regresarán al inventario.')) return;
+        (s.items||[]).forEach(i=>{
+          if(!i._isService){
+            const p=(state.products||[]).find(x=>x.sku===i.sku);
+            if(p){
+              p.stock=(p.stock||0)+(i.qty||0);
+              p.movs=p.movs||[]; p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+(i.qty||0), stockFinal:p.stock, ref:folio});
+            }
+          }
+        });
+        s.estado='cancelada'; s.cancelInfo={fecha:new Date().toISOString(), usuario:'admin'};
+        DB.save(state);
+        if(Dashboard&&Dashboard.render) Dashboard.render();
+        if(Inventario&&Inventario.renderTabla) Inventario.renderTabla();
+        if(Historial&&Historial.renderTabla) Historial.renderTabla();
+        alert('✅ Venta cancelada y stock restituido.');
+      }catch(e){ alert('Error al cancelar: '+(e&&e.message?e.message:e)); }
+    };
+  }
+  function injectCancelarButtons(){
+    try{
+      const table=document.getElementById('histTabla')||document.querySelector('#historial table, [data-section=\"historial\"] table');
+      if(!table) return;
+      try{
+        const labels=Array.from(table.querySelectorAll('thead th')).map(x=>(x.textContent||'').toLowerCase().trim());
+        const tr=table.querySelector('thead tr');
+        if(tr){
+          if(labels.indexOf('pago')===-1){ const th=document.createElement('th'); th.textContent='Pago'; tr.insertBefore(th, tr.lastElementChild); }
+          if(labels.indexOf('estado')===-1){ const th=document.createElement('th'); th.textContent='Estado'; tr.insertBefore(th, tr.lastElementChild); }
+        }
+      }catch(e){}
+      table.querySelectorAll('tbody tr').forEach(tr=>{
+        const tds=tr.querySelectorAll('td'); if(tds.length<5) return;
+        const folio=(tds[0].textContent||'').trim();
+        const s=(state.sales||[]).find(x=>x.folio===folio); if(!s) return;
+        const last=tds[tds.length-1];
+        if(tds.length<=6){
+          const pagoTd=document.createElement('td'); pagoTd.textContent=(s.pago&&s.pago.tipo)||'efectivo';
+          const estTd=document.createElement('td'); estTd.textContent=s.estado==='cancelada'?'Cancelada':'Completada';
+          tr.insertBefore(pagoTd, last); tr.insertBefore(estTd, last);
+        }else{
+          let pagoTd=tds[tds.length-3], estTd=tds[tds.length-2];
+          if(pagoTd) pagoTd.textContent=(s.pago&&s.pago.tipo)||'efectivo';
+          if(estTd) estTd.textContent=s.estado==='cancelada'?'Cancelada':'Completada';
+        }
+        if(s.estado!=='cancelada' && !last.querySelector('button[data-role=\"cancelar\"]')){
+          const btn=document.createElement('button'); btn.className='btn small'; btn.style.background='#d00'; btn.style.color='#fff'; btn.style.marginRight='6px';
+          btn.setAttribute('data-role','cancelar'); btn.textContent='✖️ Cancelar'; btn.onclick=()=>Historial.cancel(folio);
+          last.insertBefore(btn, last.firstChild);
+        }
+      });
+    }catch(e){}
+  }
+
+  function onRender(){ ensurePagoUI(); injectEntradasButtons(); injectCancelarButtons(); }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', onRender); } else { onRender(); }
+
+  try{ const _h=Historial&&Historial.renderTabla; if(typeof _h==='function'){ Historial.renderTabla=function(){ const r=_h.apply(Historial,arguments); injectCancelarButtons(); return r; }; } }catch(e){}
+  try{ const _i=Inventario&&Inventario.renderTabla; if(typeof _i==='function'){ Inventario.renderTabla=function(){ const r=_i.apply(Inventario,arguments); injectEntradasButtons(); return r; }; } }catch(e){}
+  try{ const _d=Dashboard&&Dashboard.render; if(typeof _d==='function'){ Dashboard.render=function(){ const r=_d.apply(Dashboard,arguments); ensurePagoUI(); return r; }; } }catch(e){}
+
+  console.log('Dinamita POS v4.3 helpers cargados');
+})();
+// === end v4.3 helpers ===
