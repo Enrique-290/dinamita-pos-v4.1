@@ -1,7 +1,7 @@
 
 // Simple store
 const STORAGE_KEY='dinamita_pos_v4';
-const SCHEMA_VERSION=7;
+const SCHEMA_VERSION=8;
 
 const DEFAULT_SETTINGS = {
   iva: 0, // default 0
@@ -41,10 +41,14 @@ const DB={
       try{
         let d=JSON.parse(raw);
         if(!d.schemaVersion||d.schemaVersion<SCHEMA_VERSION)d=this.migrate(d);
+        /* normalize V4.1 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
         return d;
       }catch(e){}
     }
-    let d=this.seed(); this.save(d); return d;
+    let d=this.seed(); this.save(d); /* normalize V4.1 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
+        return d;
   },
   save(d){ localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); },
   seed(){
@@ -70,7 +74,9 @@ const DB={
     d.customers=(d.customers||[]).map(c=>({certificadoMedico:false,entrenaSolo:false,...c}));
     d.memberships=d.memberships||[];
     d.sales=(d.sales||[]).map(s=>({...s,subtotalCosto:s.subtotalCosto??(s.items||[]).reduce((a,i)=>a+(i.costo||0)*(i.qty||0),0)}));
-    return d;
+    /* normalize V4.1 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
+        return d;
   }
 };
 
@@ -160,14 +166,14 @@ const Dashboard={
   _filterSales(){
     const ini=document.getElementById('dashIni').value||'0000-01-01';
     const fin=document.getElementById('dashFin').value||'9999-12-31';
-    return state.sales.filter(s=>{
+    return state.sales.filter(s=>{ if(s.estado==='cancelada') return false;
       const f=s.fecha.slice(0,10);
       return f>=ini && f<=fin;
     });
   },
   render(){
     const today=new Date().toISOString().slice(0,10);
-    const ventasHoy=state.sales.filter(s=>s.fecha.slice(0,10)===today);
+    const ventasHoy=state.sales.filter(s=>s.fecha.slice(0,10)===today && s.estado!=='cancelada');
     const totalHoy=ventasHoy.reduce((a,s)=>a+s.total,0);
     const utilidad=ventasHoy.reduce((a,s)=>a+((s.total-s.iva)-(s.subtotalCosto||0)),0);
     document.getElementById('kpiVentasHoy').textContent=money(totalHoy);
@@ -384,7 +390,7 @@ const Ventas={
         return {sku:it.sku,nombre:it.nombre,precio:it.precio,costo:prod?.costo||0,qty:it.qty};
       }
     });
-    const venta={folio,fecha:new Date().toISOString(),items,subtotal:totals.subtotal,iva:totals.iva,total:totals.total,cliente,notas:state.settings.mensaje||''};
+    const venta={folio,fecha:new Date().toISOString(),items,subtotal:totals.subtotal,iva:totals.iva,total:totals.total,cliente,notas:state.settings.mensaje||'',pago:{tipo:(document.getElementById('ventaPago')?.value||'efectivo')},estado:'completada'};
     venta.subtotalCosto=items.reduce((a,i)=>a+(i.costo||0)*i.qty,0);
     venta.ganancia=(venta.total-venta.iva)-venta.subtotalCosto;
     state.sales.unshift(venta); DB.save(state);
@@ -427,7 +433,8 @@ const Inventario={
       return okQ&&okC;
     }).map(p=>{
       const badge=p.stock>5?'<span class="badge ok">✅ OK</span>':p.stock>0?'<span class="badge warn">⚠️ Bajo</span>':'<span class="badge bad">⛔ Agotado</span>';
-      return `<tr><td>${esc(p.sku)}</td><td>${esc(p.nombre)}</td><td>${esc(p.categoria||'')}</td><td>${money(p.precio)}</td><td>${money(p.costo||0)}</td><td>${p.stock} ${badge}</td><td><button class="btn small" onclick="Inventario.edit('${p.sku}')">✏️</button> <button class="btn small danger" onclick="Inventario.del('${p.sku}')">🗑️</button></td></tr>`;
+      return `<tr><td>${esc(p.sku)}</td><td>${esc(p.nombre)}</td><td>${esc(p.categoria||'')}</td><td>${money(p.precio)}</td><td>${money(p.costo||0)}</td><td>${p.stock} ${badge}</td><td><button class="btn small" onclick="Inventario.edit('${p.sku}')">✏️</button> <button class="btn small danger" onclick="Inventario.del('${p.sku}')">🗑️</button>
+        <button class="btn small" onclick="Inventario.entrada('${p.sku}')">➕ Entradas</button></td></tr>`;
     }).join('');
     document.getElementById('invTabla').innerHTML=`<table><thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Costo</th><th>Stock</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7">Sin productos</td></tr>'}</tbody></table>`;
   },
@@ -443,7 +450,20 @@ const Inventario={
     window.scrollTo({top:0,behavior:'smooth'});
   },
   del(sku){if(!confirm('¿Eliminar producto?'))return; state.products=state.products.filter(x=>x.sku!==sku); DB.save(state); this.renderTabla();},
-  exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
+  
+entrada(sku){
+  const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
+  const val = prompt('Cantidad a ingresar para '+p.nombre+':','1');
+  const qty = parseInt(val||'0',10);
+  if(!qty || qty<=0) return;
+  p.stock = (p.stock||0) + qty;
+  p.movs = p.movs||[];
+  p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
+  DB.save(state);
+  this.renderTabla();
+  alert('Stock actualizado: '+p.stock);
+},
+exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
 };
 
 const Clientes={
@@ -684,6 +704,7 @@ const Historial={
     const folio=(document.getElementById('histFolio')?.value||'').toLowerCase();
     const clienteQ=(document.getElementById('histCliente')?.value||'').toLowerCase();
     const prodQ=(document.getElementById('histProducto')?.value||'').toLowerCase();
+    const pagoQ=(document.getElementById('histPago')?.value||'').toLowerCase();
     const rows=state.sales.filter(s=>{
       const f=s.fecha.slice(0,10);
       if(ini&&f<ini)return false;
@@ -692,13 +713,14 @@ const Historial={
       const cliente=(state.customers.find(c=>c.id===s.cliente)?.nombre||'').toLowerCase();
       if(clienteQ&&!cliente.includes(clienteQ))return false;
       if(prodQ&&!s.items.map(i=>i.nombre).join(' ').toLowerCase().includes(prodQ))return false;
+      if(pagoQ && ((s.pago?.tipo||'efectivo').toLowerCase()!==pagoQ)) return false;
       return true;
     }).map(s=>{
       const cli=state.customers.find(c=>c.id===s.cliente)?.nombre||'';
       const itemsStr=s.items.map(i=>`${i.nombre} x${i.qty}`).join(', ');
-      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td><td>${money(s.total)}</td><td><button class='btn small' onclick=\"Tickets.renderByFolio('${s.folio}')\">🖨️ Reimprimir</button></td></tr>`;
+      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td>`+`<td>${money(s.total)}</td><td>${(s.pago?.tipo||'efectivo')}</td><td>${s.estado==='cancelada'?'Cancelada':'Completada'}</td><td>`+(s.estado==='cancelada' ? `<button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` : `<button class='btn small' style="background:#d00;color:#fff" data-cancel="1" data-folio="${s.folio}" onclick="Historial.cancel('${s.folio}')">✖️ Cancelar</button> <button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` )+`</td></tr>`;
     }).join('');
-    document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6">Sin ventas</td></tr>'}</tbody></table>`;
+    document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8">Sin ventas</td></tr>'}</tbody></table>`;
   },
   exportCSV(){
     const rows=[['Folio','Fecha','Cliente','Items','Total','IVA','Costo','Ganancia']].concat(state.sales.map(s=>[s.folio,s.fecha,(state.customers.find(c=>c.id===s.cliente)?.nombre||''),s.items.map(i=>`${i.nombre} x${i.qty}`).join('; '),s.total,s.iva,(s.subtotalCosto||0),((s.total-s.iva)-(s.subtotalCosto||0))]));
@@ -866,7 +888,7 @@ const Tickets={
     lines.push(padRight('SUBTOTAL',20)+padLeft(money(v.subtotal),12));
     lines.push(padRight('IVA',20)+padLeft(money(v.iva),12));
     lines.push(padRight('TOTAL',20)+padLeft(money(v.total),12));
-    lines.push(repeat('-',32));
+    lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));lines.push(repeat('-',32));
     const nota=(v.notas&&v.notas.trim())?v.notas.trim():(state.settings.mensaje||'');
     if(nota)lines.push(nota);
     document.getElementById('ticketBody').textContent=lines.join('\n');
@@ -885,11 +907,10 @@ function downloadCSV(filename,rows){
 window.addEventListener('DOMContentLoaded',UI.init);
 
 
-// --- V4.1 hotfix: expose modules globally for mobile onclick ---
+// --- V4.1 combined hotfix ---
 try{ window.Historial = Historial; }catch(e){}
 try{ window.Inventario = Inventario; }catch(e){}
 try{ window.Tickets = Tickets; }catch(e){}
-// --- V4.1 hotfix: delegation for cancel buttons ---
 (function(){
   function bindDelegation(){
     var cont = document.getElementById('histTabla');
@@ -898,7 +919,7 @@ try{ window.Tickets = Tickets; }catch(e){}
       var el = e.target;
       if(el && el.closest){
         var btn = el.closest('button');
-        if(btn && (btn.dataset && btn.dataset.cancel==='1')){
+        if(btn && btn.dataset && btn.dataset.cancel==='1'){
           var folio = btn.getAttribute('data-folio');
           if(folio && window.Historial && typeof window.Historial.cancel==='function'){
             window.Historial.cancel(folio);
@@ -910,16 +931,15 @@ try{ window.Tickets = Tickets; }catch(e){}
   }
   if(document.readyState==='loading'){
     document.addEventListener('DOMContentLoaded', bindDelegation);
-  }else{
-    bindDelegation();
-  }
-  // rebind after table re-render
+  }else{ bindDelegation(); }
   var _oldRender = Historial.renderTabla;
   if(typeof _oldRender === 'function'){
-    Historial.renderTabla = function(){
-      _oldRender.apply(Historial, arguments);
-      bindDelegation();
-    };
+    Historial.renderTabla = function(){ _oldRender.apply(Historial, arguments); bindDelegation(); };
   }
+  // Visible tag: añade "· v4.1h" en el título de Historial para confirmar carga
+  try{
+    var hs = document.querySelector('[data-section="historial"] h3, #historial h3, h3');
+    if(hs && !/v4\.1h/.test(hs.textContent)) hs.textContent = hs.textContent + ' · v4.1h';
+  }catch(e){}
 })();
 // --- end hotfix ---
