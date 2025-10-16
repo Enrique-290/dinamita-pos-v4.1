@@ -41,10 +41,14 @@ const DB={
       try{
         let d=JSON.parse(raw);
         if(!d.schemaVersion||d.schemaVersion<SCHEMA_VERSION)d=this.migrate(d);
+        /* normalize v42 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
         return d;
       }catch(e){}
     }
-    let d=this.seed(); this.save(d); return d;
+    let d=this.seed(); this.save(d); /* normalize v42 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
+        return d;
   },
   save(d){ localStorage.setItem(STORAGE_KEY,JSON.stringify(d)); },
   seed(){
@@ -70,7 +74,9 @@ const DB={
     d.customers=(d.customers||[]).map(c=>({certificadoMedico:false,entrenaSolo:false,...c}));
     d.memberships=d.memberships||[];
     d.sales=(d.sales||[]).map(s=>({...s,subtotalCosto:s.subtotalCosto??(s.items||[]).reduce((a,i)=>a+(i.costo||0)*(i.qty||0),0)}));
-    return d;
+    /* normalize v42 */
+        try{ (d.sales||[]).forEach(s=>{ s.estado=s.estado||'completada'; s.pago=s.pago||{tipo:'efectivo'}; }); (d.products||[]).forEach(p=>{ if(!p.movs) p.movs=[]; }); }catch(e){}
+        return d;
   }
 };
 
@@ -160,14 +166,14 @@ const Dashboard={
   _filterSales(){
     const ini=document.getElementById('dashIni').value||'0000-01-01';
     const fin=document.getElementById('dashFin').value||'9999-12-31';
-    return state.sales.filter(s=>{
+    return state.sales.filter(s=>{ if(s.estado==='cancelada') return false;
       const f=s.fecha.slice(0,10);
       return f>=ini && f<=fin;
     });
   },
   render(){
     const today=new Date().toISOString().slice(0,10);
-    const ventasHoy=state.sales.filter(s=>s.fecha.slice(0,10)===today);
+    const ventasHoy=state.sales.filter(s=>s.fecha.slice(0,10)===today && s.estado!=='cancelada');
     const totalHoy=ventasHoy.reduce((a,s)=>a+s.total,0);
     const utilidad=ventasHoy.reduce((a,s)=>a+((s.total-s.iva)-(s.subtotalCosto||0)),0);
     document.getElementById('kpiVentasHoy').textContent=money(totalHoy);
@@ -384,7 +390,7 @@ const Ventas={
         return {sku:it.sku,nombre:it.nombre,precio:it.precio,costo:prod?.costo||0,qty:it.qty};
       }
     });
-    const venta={folio,fecha:new Date().toISOString(),items,subtotal:totals.subtotal,iva:totals.iva,total:totals.total,cliente,notas:state.settings.mensaje||''};
+    const venta={folio,fecha:new Date().toISOString(),items,subtotal:totals.subtotal,iva:totals.iva,total:totals.total,cliente,notas:state.settings.mensaje||'',pago:{tipo:(document.getElementById('ventaPago')?.value||'efectivo')},estado:'completada'};
     venta.subtotalCosto=items.reduce((a,i)=>a+(i.costo||0)*i.qty,0);
     venta.ganancia=(venta.total-venta.iva)-venta.subtotalCosto;
     state.sales.unshift(venta); DB.save(state);
@@ -443,7 +449,19 @@ const Inventario={
     window.scrollTo({top:0,behavior:'smooth'});
   },
   del(sku){if(!confirm('¿Eliminar producto?'))return; state.products=state.products.filter(x=>x.sku!==sku); DB.save(state); this.renderTabla();},
-  exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
+  
+entrada(sku){
+  const p=state.products.find(x=>x.sku===sku); if(!p) return alert('Producto no encontrado');
+  const val=prompt('Cantidad a ingresar para '+p.nombre+':','1');
+  const qty=parseInt(val||'0',10); if(!qty||qty<=0) return;
+  p.stock=(p.stock||0)+qty;
+  p.movs=p.movs||[];
+  p.movs.push({fecha:new Date().toISOString(), tipo:'ENTRADA_MANUAL', cantidad:+qty, stockFinal:p.stock, nota:'Manual'});
+  DB.save(state);
+  Inventario.renderTabla();
+  alert('Stock actualizado: '+p.stock);
+},
+exportCSV(){const rows=[['SKU','Nombre','Categoría','Precio','Costo','Stock']].concat(state.products.map(p=>[p.sku,p.nombre,p.categoria||'',p.precio,p.costo||0,p.stock])); downloadCSV('inventario.csv',rows);}
 };
 
 const Clientes={
@@ -488,7 +506,7 @@ const Clientes={
       const es=c.entrenaSolo?'<span class="badge warn">🏋️‍♂️ Solo</span>':'<span class="badge ok">👥 Acomp.</span>';
       return `<tr><td>${esc(c.nombre)}</td><td>${esc(c.tel||'')}</td><td>${esc(c.email||'')}</td><td>${cm}</td><td>${es}</td><td><button class="btn small" onclick="Clientes.edit('${c.id}')">✏️</button> <button class="btn small danger" onclick="Clientes.del('${c.id}')">🗑️</button></td></tr>`;
     }).join('');
-    document.getElementById('cliTabla').innerHTML=`<table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Cert. médico</th><th>Entrena</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6">Sin clientes</td></tr>'}</tbody></table>`;
+    document.getElementById('cliTabla').innerHTML=`<table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Cert. médico</th><th>Entrena</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8">Sin clientes</td></tr>'}</tbody></table>`;
   },
   exportCSV(){const rows=[['ID','Nombre','Telefono','Email','CertificadoMedico','EntrenaSolo']].concat(state.customers.map(c=>[c.id,c.nombre||'',c.tel||'',c.email||'',c.certificadoMedico?'SI':'NO',c.entrenaSolo?'SOLO':'ACOMPAÑADO']));downloadCSV('clientes.csv',rows);}
 };
@@ -678,7 +696,31 @@ const Historial={
   closeFiltros(){const m=document.getElementById('modalFiltros'); m.classList.add('hidden'); m.setAttribute('aria-hidden','true');},
   applyFiltros(){this.renderTabla(); this.closeFiltros();},
   clearFiltros(){['histFechaIni','histFechaFin','histFolio','histCliente','histProducto'].forEach(id=>document.getElementById(id).value='');document.getElementById('histPago').value='';this.renderTabla();},
-  renderTabla(){
+  
+cancel(folio){
+  try{
+    const s = state.sales.find(x=>x.folio===folio);
+    if(!s){ alert('Venta no encontrada'); return; }
+    if(s.estado==='cancelada'){ alert('La venta ya está cancelada.'); return; }
+    if(!confirm('¿Cancelar la venta '+folio+'?\nLos productos se regresarán al inventario.')) return;
+    (s.items||[]).forEach(i=>{
+      if(!i._isService){
+        const p = state.products.find(x=>x.sku===i.sku);
+        if(p){
+          p.stock = (p.stock||0) + (i.qty||0);
+          p.movs = p.movs||[];
+          p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+(i.qty||0), stockFinal:p.stock, ref:folio});
+        }
+      }
+    });
+    s.estado='cancelada';
+    s.cancelInfo={fecha:new Date().toISOString(), usuario:'admin'};
+    DB.save(state);
+    Dashboard.render(); Inventario.renderTabla(); Historial.renderTabla();
+    alert('✅ Venta cancelada y stock restituido.');
+  }catch(e){ alert('Error al cancelar: '+(e&&e.message?e.message:e)); }
+},
+renderTabla(){
     const ini=document.getElementById('histFechaIni')?.value||'';
     const fin=document.getElementById('histFechaFin')?.value||'';
     const folio=(document.getElementById('histFolio')?.value||'').toLowerCase();
@@ -696,9 +738,9 @@ const Historial={
     }).map(s=>{
       const cli=state.customers.find(c=>c.id===s.cliente)?.nombre||'';
       const itemsStr=s.items.map(i=>`${i.nombre} x${i.qty}`).join(', ');
-      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td><td>${money(s.total)}</td><td><button class='btn small' onclick=\"Tickets.renderByFolio('${s.folio}')\">🖨️ Reimprimir</button></td></tr>`;
+      return `<tr><td>${esc(s.folio)}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(itemsStr)}</td>`+`<td>${money(s.total)}</td><td>${(s.pago?.tipo||'efectivo')}</td><td>${s.estado==='cancelada'?'Cancelada':'Completada'}</td><td>`+(s.estado==='cancelada' ? `<button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` : `<button class='btn small' style="background:#d00;color:#fff" data-folio="${s.folio}" onclick="Historial.cancel('${s.folio}')">✖️ Cancelar</button> <button class='btn small' onclick="Tickets.renderByFolio('${s.folio}')">🖨️ Reimprimir</button>` )+`</td></tr>`;
     }).join('');
-    document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6">Sin ventas</td></tr>'}</tbody></table>`;
+    document.getElementById('histTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th>Pago</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${rows||'<tr><td colspan="8">Sin ventas</td></tr>'}</tbody></table>`;
   },
   exportCSV(){
     const rows=[['Folio','Fecha','Cliente','Items','Total','IVA','Costo','Ganancia']].concat(state.sales.map(s=>[s.folio,s.fecha,(state.customers.find(c=>c.id===s.cliente)?.nombre||''),s.items.map(i=>`${i.nombre} x${i.qty}`).join('; '),s.total,s.iva,(s.subtotalCosto||0),((s.total-s.iva)-(s.subtotalCosto||0))]));
@@ -734,7 +776,7 @@ const Reportes={
       const items=s.items.map(i=>`${i.nombre} x${i.qty}`).join('; ');
       return `<tr><td>${s.folio}</td><td>${s.fecha.slice(0,16).replace('T',' ')}</td><td>${esc(cli)}</td><td>${esc(items)}</td><td>${money(s.total)}</td></tr>`;
     }).join('');
-    document.getElementById('repVenTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th></tr></thead><tbody>${body||'<tr><td colspan="5">Sin registros</td></tr>'}</tbody></table>`;
+    document.getElementById('repVenTabla').innerHTML=`<table><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Items</th><th>Total</th><th>Pago</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${body||'<tr><td colspan="5">Sin registros</td></tr>'}</tbody></table>`;
   },
   exportVentas(){
     const ini=document.getElementById('repVenIni').value||'0000-01-01';
@@ -760,7 +802,7 @@ const Reportes={
       const st=Membresias.status(m);
       return `<tr><td>${esc(cli)}</td><td>${esc(m.tipo)}</td><td>${m.inicio}</td><td>${m.fin}</td><td>${st}</td><td>${esc(m.notas||'')}</td></tr>`;
     }).join('');
-    document.getElementById('repMemTabla').innerHTML=`<table><thead><tr><th>Cliente</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Estado</th><th>Notas</th></tr></thead><tbody>${body||'<tr><td colspan="6">Sin registros</td></tr>'}</tbody></table>`;
+    document.getElementById('repMemTabla').innerHTML=`<table><thead><tr><th>Cliente</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Estado</th><th>Notas</th></tr></thead><tbody>${body||'<tr><td colspan="8">Sin registros</td></tr>'}</tbody></table>`;
   },
   exportMembresias(){
     const ini=document.getElementById('repMemIni').value||'0000-01-01';
@@ -771,7 +813,7 @@ const Reportes={
   },
   renderInventario(){
     const rows=state.products.map(p=>`<tr><td>${esc(p.sku)}</td><td>${esc(p.nombre)}</td><td>${esc(p.categoria||'')}</td><td>${money(p.precio)}</td><td>${money(p.costo||0)}</td><td>${p.stock}</td></tr>`).join('');
-    document.getElementById('repInvTabla').innerHTML=`<table><thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Costo</th><th>Stock</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Sin productos</td></tr>'}</tbody></table>`;
+    document.getElementById('repInvTabla').innerHTML=`<table><thead><tr><th>SKU</th><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Costo</th><th>Stock</th></tr></thead><tbody>${rows||'<tr><td colspan="8">Sin productos</td></tr>'}</tbody></table>`;
   },
   renderTops(){
     const sales=state.sales;
@@ -866,7 +908,7 @@ const Tickets={
     lines.push(padRight('SUBTOTAL',20)+padLeft(money(v.subtotal),12));
     lines.push(padRight('IVA',20)+padLeft(money(v.iva),12));
     lines.push(padRight('TOTAL',20)+padLeft(money(v.total),12));
-    lines.push(repeat('-',32));
+    lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));lines.push(repeat('-',32));
     const nota=(v.notas&&v.notas.trim())?v.notas.trim():(state.settings.mensaje||'');
     if(nota)lines.push(nota);
     document.getElementById('ticketBody').textContent=lines.join('\n');
@@ -885,102 +927,23 @@ function downloadCSV(filename,rows){
 window.addEventListener('DOMContentLoaded',UI.init);
 
 
-// === Dinamita POS • Hotfix append • v4.1-final ===
+// --- Dinamita POS v4.2 stable (mobile + single build) ---
 (function(){
-  try{ window.Historial = Historial; }catch(e){}
-  try{ window.Inventario = Inventario; }catch(e){}
-  try{ window.Tickets = Tickets; }catch(e){}
-
-  if(!(window.Historial && typeof Historial.cancel==='function')){
-    try{
-      Historial.cancel = function(folio){
-        try{
-          var s = (window.state && state.sales || []).find(function(x){ return x.folio===folio; });
-          if(!s){ alert('Venta no encontrada'); return; }
-          if(s.estado==='cancelada'){ alert('La venta ya está cancelada.'); return; }
-          if(!confirm('¿Cancelar la venta '+folio+'?\nLos productos se regresarán al inventario.')) return;
-          (s.items||[]).forEach(function(i){
-            if(!i._isService){
-              var p = (state.products||[]).find(function(x){ return x.sku===i.sku; });
-              if(p){
-                p.stock = (p.stock||0) + (i.qty||0);
-                p.movs = p.movs||[];
-                p.movs.push({fecha:new Date().toISOString(), tipo:'CANCELACION', cantidad:+(i.qty||0), stockFinal:p.stock, ref:folio});
-              }
-            }
-          });
-          s.estado='cancelada';
-          s.cancelInfo = {fecha:new Date().toISOString(), usuario:'admin'};
-          if(window.DB && typeof DB.save==='function') DB.save(state);
-          if(window.Dashboard && typeof Dashboard.render==='function') Dashboard.render();
-          if(window.Inventario && typeof Inventario.renderTabla==='function') Inventario.renderTabla();
-          if(window.Historial && typeof Historial.renderTabla==='function') Historial.renderTabla();
-          alert('✅ Venta cancelada y stock restituido.');
-        }catch(e){ alert('Error al cancelar: '+(e&&e.message?e.message:e)); }
-      };
-    }catch(e){}
+  try{ window.Historial=Historial; window.Inventario=Inventario; window.Tickets=Tickets; }catch(e){}
+  function bind(){
+    var t=document.getElementById('histTabla')||document.querySelector('#historial table, [data-section="historial"] table');
+    if(!t||t.dataset.cBound) return;
+    t.addEventListener('click',function(e){
+      var b=e.target.closest&&e.target.closest('button'); if(!b) return;
+      if((b.textContent||'').toLowerCase().includes('cancelar')){
+        var tr=b.closest('tr'); var folio=tr&&tr.cells&&tr.cells[0]?tr.cells[0].textContent.trim():b.getAttribute('data-folio');
+        if(folio && window.Historial && typeof Historial.cancel==='function') Historial.cancel(folio);
+      }
+    },true);
+    t.dataset.cBound='1';
   }
-
-  function injectCancelButtons(){
-    try{
-      var table = document.getElementById('histTabla') || document.querySelector('#historial table, [data-section="historial"] table');
-      if(!table) return;
-      var rows = table.querySelectorAll('tbody tr');
-      rows.forEach(function(tr){
-        var tds = tr.querySelectorAll('td');
-        if(!tds.length) return;
-        var folio = (tds[0].textContent||'').trim();
-        var actionsTd = tds[tds.length-1];
-        if(!actionsTd) return;
-        var already = actionsTd.querySelector('button[data-role="cancelar"]');
-        var estadoText = (tr.textContent||'').toLowerCase();
-        var isCanceled = estadoText.includes('cancelada');
-        if(already || isCanceled) return;
-        var btn = document.createElement('button');
-        btn.className = 'btn small';
-        btn.setAttribute('data-role','cancelar');
-        btn.setAttribute('data-folio', folio);
-        btn.style.background = '#d00';
-        btn.style.color = '#fff';
-        btn.style.marginLeft = '6px';
-        btn.textContent = '✖️ Cancelar';
-        btn.addEventListener('click', function(ev){
-          ev.preventDefault();
-          if(window.Historial && typeof Historial.cancel==='function'){
-            Historial.cancel(folio);
-          }else if(window.__cancelBtn){
-            __cancelBtn(folio);
-          }
-        }, {passive:false});
-        var printBtn = actionsTd.querySelector('button');
-        if(printBtn) actionsTd.insertBefore(btn, printBtn);
-        else actionsTd.appendChild(btn);
-      });
-    }catch(e){}
-  }
-
-  try{
-    var _rt = Historial && Historial.renderTabla;
-    if(typeof _rt === 'function'){
-      Historial.renderTabla = function(){
-        var r = _rt.apply(Historial, arguments);
-        injectCancelButtons();
-        return r;
-      };
-    }
-  }catch(e){}
-
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', injectCancelButtons);
-  }else{
-    injectCancelButtons();
-  }
-
-  window.__cancelBtn = function(folio){
-    if(window.Historial && typeof Historial.cancel==='function'){ Historial.cancel(folio); }
-    else alert('No se pudo acceder a Historial.cancel');
-  };
-
-  console.log('Dinamita POS • hotfix append v4.1-final cargado');
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', bind); } else { bind(); }
+  var _rt=Historial&&Historial.renderTabla; if(typeof _rt==='function'){ Historial.renderTabla=function(){ var r=_rt.apply(Historial,arguments); bind(); return r; }; }
+  console.log('Dinamita POS v4.2 cargado');
 })();
-// === fin hotfix ===
+// --- end v4.2 ---
