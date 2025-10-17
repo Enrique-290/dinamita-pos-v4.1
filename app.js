@@ -1,3 +1,4 @@
+window.APP_VERSION="v4.6.4"; window.BUILD_TIME="2025-10-17 23:08";
 
 // Simple store
 const STORAGE_KEY='dinamita_pos_v4';
@@ -1118,3 +1119,14 @@ window.addEventListener('DOMContentLoaded',UI.init);
   alert('Membresía registrada.');
 },
 
+
+;(function(){
+  function applyVersion(){
+    var verEl=document.getElementById('appVersion');
+    var btEl=document.getElementById('buildTime');
+    if(verEl) verEl.textContent=(window.APP_VERSION||'');
+    if(btEl) btEl.textContent=(window.BUILD_TIME||'');
+  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', applyVersion); }
+  else { applyVersion(); }
+})();
