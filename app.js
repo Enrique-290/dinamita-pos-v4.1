@@ -274,13 +274,14 @@ const Ventas={
   tipo:'producto',
   init(){
     this.fillTiposMembresia();
+    const tsel=document.getElementById('ventaTipo'); if(tsel){ tsel.value='producto'; }
     this.changeTipo();
-    this.searchCliente(''); // preload PG
+    this.searchCliente(''); // no default cliente
   },
   changeTipo(){
     this.tipo=document.getElementById('ventaTipo').value;
     document.getElementById('ventaProductoBox').classList.toggle('hidden', this.tipo!=='producto');
-    document.getElementById('ventaMembresiaBox').classList.toggle('hidden', this.tipo!=='membresia');
+    document.getElementById('ventaMembresiaBox').classList.add('hidden'); // v4.5: membresías solo en módulo Membresías
     this.renderCarrito();
     const t=new Date().toISOString().slice(0,10);
     document.getElementById('vMemInicio').value=t;
@@ -379,7 +380,7 @@ const Ventas={
     }
     // descuenta stock solo productos
     Ventas.carrito.forEach(it=>{ if(!it._isService){ const p=state.products.find(x=>x.sku===it.sku); p.stock-=it.qty; }});
-    const cliente=document.getElementById('ventaCliente').value || 'C1';
+    const cliente=document.getElementById('ventaCliente').value || '';
     const totals=Ventas.updateTotals();
     const folio='T'+Date.now().toString().slice(-8);
     const items=Ventas.carrito.map(it=>{
@@ -404,6 +405,11 @@ const Ventas={
 
     Ventas.carrito=[];
     Ventas.renderCarrito();
+    // limpiar formulario de Ventas
+    const vc=document.getElementById('ventaCliente'); if(vc) vc.value='';
+    const vcs=document.getElementById('ventaClienteSearch'); if(vcs) vcs.value='';
+    const vp=document.getElementById('ventaPago'); if(vp) vp.value='efectivo';
+    const vs=document.getElementById('ventaResultados'); if(vs) vs.innerHTML='';
     Dashboard.render();
     Inventario.renderTabla();
     Historial.renderTabla();
@@ -550,26 +556,41 @@ const Membresias={
     DB.save(state); Membresias.renderTipos(); Membresias.fillTipos(); Ventas.fillTiposMembresia();
   },
   cobrarAqui(){
-    // Registra y cobra en un solo paso desde la sección Membresías
+    // Retrocompatibilidad: redirige a vender()
+    return this.vender();
+  },
+  vender(){
+    // Registra y cobra en un solo paso desde la sección Membresías (v4.5)
     const cliente=document.getElementById('memClienteId').value;
-    if(!cliente || cliente==='C1'){ alert('Selecciona un cliente válido'); return; }
+    if(!cliente){ alert('Selecciona un cliente válido'); return; }
     const tipo=document.getElementById('memTipo').value;
     const inicio=document.getElementById('memInicio').value;
     const fin=document.getElementById('memFin').value;
+    const pagoSel=document.getElementById('memPago') ? document.getElementById('memPago').value : 'efectivo';
     const tinfo=(state.settings.tiposMembresia||[]).find(t=>t.nombre===tipo)||{precio:0};
-    // Genera venta directa
     const folio='T'+Date.now().toString().slice(-8);
     const item={sku:'SERV-MEM', nombre:'Membresía '+tipo, precio:tinfo.precio, qty:1, _isService:true, mem:{tipo,inicio,fin}};
     const subtotal=item.precio, iva=subtotal*(state.settings.iva||0)/100, total=subtotal+iva;
-    const venta={folio,fecha:new Date().toISOString(),items:[item],subtotal,iva,total,cliente,notas:state.settings.mensaje||''};
+    const venta={folio,fecha:new Date().toISOString(),items:[item],subtotal,iva,total,cliente,notas:state.settings.mensaje||'', pago:{tipo:pagoSel}, estado:'completada'};
     venta.subtotalCosto=0; venta.ganancia=(venta.total-venta.iva);
     state.sales.unshift(venta);
-    // Registra membresía
+    // Registrar membresía
     const id='M'+Date.now().toString(36);
-    state.memberships.unshift({id,cliente,tipo,inicio,fin,notas:'(Cobrado en Membresías)'});
+    state.memberships.unshift({id,cliente,tipo,inicio,fin,notas:(document.getElementById('memNotas').value||'')});
     DB.save(state);
+    // Refrescar vistas
     Historial.renderTabla(); Tickets.render(venta); UI.show('ticket');
+    // Limpiar formulario para siguiente venta
+    const busc=document.getElementById('memClienteSearch'); if(busc) busc.value='';
+    const cid=document.getElementById('memClienteId'); if(cid) cid.value='';
+    const pag=document.getElementById('memPago'); if(pag) pag.value='efectivo';
+    const notas=document.getElementById('memNotas'); if(notas) notas.value='';
+    const tipoSel=document.getElementById('memTipo'); if(tipoSel && tipoSel.options.length) tipoSel.selectedIndex=0;
+    const hoy=new Date().toISOString().slice(0,10);
+    const ini=document.getElementById('memInicio'); if(ini) ini.value=hoy;
+    Membresias.changeTipo(); // recalcula fin
   },
+
 
   fillClientes(){
     document.getElementById('memClienteSearch').value='';
@@ -888,8 +909,7 @@ const Tickets={
     lines.push(padRight('SUBTOTAL',20)+padLeft(money(v.subtotal),12));
     lines.push(padRight('IVA',20)+padLeft(money(v.iva),12));
     lines.push(padRight('TOTAL',20)+padLeft(money(v.total),12));
-    lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));
-lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));lines.push(repeat('-',32));
+    lines.push('Pago con: '+(((v.pago&&v.pago.tipo)||'efectivo').replace(/^./,c=>c.toUpperCase())));lines.push(repeat('-',32));
     const nota=(v.notas&&v.notas.trim())?v.notas.trim():(state.settings.mensaje||'');
     if(nota)lines.push(nota);
     document.getElementById('ticketBody').textContent=lines.join('\n');
