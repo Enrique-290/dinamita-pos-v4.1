@@ -303,17 +303,25 @@ const Ventas={
     document.getElementById('ventaClienteResults').classList.add('hidden');
   },
   buscarProducto(term){
-    term=(term||'').toLowerCase();
-    const res=state.products.filter(p=>p.nombre.toLowerCase().includes(term)||(p.sku||'').toLowerCase().includes(term));
-    const wrap=document.getElementById('ventaResultados'); wrap.innerHTML='';
-    res.forEach(p=>{
-      const div=document.createElement('div'); div.className='list-item';
-      div.innerHTML=`${i.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(p.nombre)}</strong> <small>(${esc(p.sku)})</small></div><div class="sub">Precio: ${money(p.precio)} • Stock: ${p.stock}</div></div><div><input type="number" min="1" step="1" value="1" style="width:70px"> <button class="btn small">➕</button></div>`;
-      div.querySelector('button').onclick=()=>{const qty=parseInt(div.querySelector('input').value||'1',10); Ventas.addCarrito(p.sku,qty)};
-      wrap.appendChild(div);
-    });
-  },
-  addCarrito(sku,qty){
+  const box=document.getElementById('ventaResultados'); if(!box) return;
+  const q=(term||'').trim().toLowerCase();
+  if(!q){ box.innerHTML=''; return; }
+  const res=state.products.filter(p=>(p.nombre||'').toLowerCase().includes(q) || (p.sku||'').toLowerCase().includes(q));
+  if(res.length===0){ box.innerHTML='<div class="muted">Sin resultados</div>'; return; }
+  box.innerHTML='';
+  res.forEach(p=>{
+    const div=document.createElement('div'); div.className='list-item result-item'; div.style.cursor='pointer';
+    div.innerHTML = `${p.img?`<img src="${p.img}" class="thumb" alt="">`:''}
+      <div style="flex:1">
+        <div><strong>${esc(p.nombre)}</strong></div>
+        <div class="muted">(${esc(p.sku||'')})</div>
+        <div class="muted">Precio: ${money(p.precio)} • Stock: ${p.stock}</div>
+      </div>`;
+    div.onclick = ()=> Ventas.addCarrito(p.sku,1);
+    box.appendChild(div);
+  });
+},
+  addCarrito(sku,qty=1){
     const p=state.products.find(x=>x.sku===sku); if(!p)return;
     const e=Ventas.carrito.find(x=>x.sku===sku && !x._isService);
     if(e) e.qty+=qty; else Ventas.carrito.push({sku,nombre:p.nombre,precio:p.precio,qty,img:p.img||''});
@@ -352,13 +360,26 @@ const Ventas={
     const c=document.getElementById('carrito'); if(!c) return;
     c.innerHTML='';
     Ventas.carrito.forEach((i,idx)=>{
-      const div=document.createElement('div'); div.className='list-item';
-      div.innerHTML=`${i.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(i.nombre)}</strong></div><div class="sub">${i._isService?'Servicio de membresía':'Producto'} · ${money(i.precio)} x ${i.qty}</div></div><div><button class="btn small" onclick="Ventas.delItem(${idx})">✕</button></div>`;
+      const div=document.createElement('div'); div.className='list-item cart-item';
+      div.innerHTML = `${i.img?`<img src="${i.img}" class="thumb" alt="">`:''}
+        <div style="flex:1">
+          <div><strong>${esc(i.nombre)}</strong></div>
+          <div class="muted">(${esc(i.sku||'')})</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <button class="btn" onclick="Ventas.subOne(${idx})">–</button>
+          <span>${i.qty}</span>
+          <button class="btn" onclick="Ventas.addOne(${idx})">+</button>
+          <div>${money(i.precio*i.qty)}</div>
+          <button class="btn small" onclick="Ventas.delItem(${idx})">🗑️</button>
+        </div>`;
       c.appendChild(div);
     });
     Ventas.updateTotals();
   },
   delItem(idx){Ventas.carrito.splice(idx,1); Ventas.renderCarrito();},
+  addOne(idx){Ventas.carrito[idx].qty++; Ventas.renderCarrito();},
+  subOne(idx){Ventas.carrito[idx].qty--; if(Ventas.carrito[idx].qty<=0){Ventas.delItem(idx);} else {Ventas.renderCarrito();}},
   updateTotals(){
     const sub=Ventas.carrito.reduce((a,i)=>a+i.precio*i.qty,0);
     const ivaPct=state.settings.iva||0;
