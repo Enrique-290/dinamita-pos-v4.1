@@ -308,7 +308,7 @@ const Ventas={
     const wrap=document.getElementById('ventaResultados'); wrap.innerHTML='';
     res.forEach(p=>{
       const div=document.createElement('div'); div.className='list-item';
-      div.innerHTML=`${p.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(p.nombre)}</strong> <small>(${esc(p.sku)})</small></div><div class="sub">Precio: ${money(p.precio)} • Stock: ${p.stock}</div></div><div><input type="number" min="1" step="1" value="1" style="width:70px"> <button class="btn small">➕</button></div>`;
+      div.innerHTML=`${i.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(p.nombre)}</strong> <small>(${esc(p.sku)})</small></div><div class="sub">Precio: ${money(p.precio)} • Stock: ${p.stock}</div></div><div><input type="number" min="1" step="1" value="1" style="width:70px"> <button class="btn small">➕</button></div>`;
       div.querySelector('button').onclick=()=>{const qty=parseInt(div.querySelector('input').value||'1',10); Ventas.addCarrito(p.sku,qty)};
       wrap.appendChild(div);
     });
@@ -316,7 +316,7 @@ const Ventas={
   addCarrito(sku,qty){
     const p=state.products.find(x=>x.sku===sku); if(!p)return;
     const e=Ventas.carrito.find(x=>x.sku===sku && !x._isService);
-    if(e) e.qty+=qty; else Ventas.carrito.push({sku,nombre:p.nombre,precio:p.precio,qty});
+    if(e) e.qty+=qty; else Ventas.carrito.push({sku,nombre:p.nombre,precio:p.precio,qty,img:p.img||''});
     Ventas.renderCarrito();
   },
   addMembresia(){
@@ -353,7 +353,7 @@ const Ventas={
     c.innerHTML='';
     Ventas.carrito.forEach((i,idx)=>{
       const div=document.createElement('div'); div.className='list-item';
-      div.innerHTML=`${p.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(i.nombre)}</strong></div><div class="sub">${i._isService?'Servicio de membresía':'Producto'} · ${money(i.precio)} x ${i.qty}</div></div><div><button class="btn small" onclick="Ventas.delItem(${idx})">✕</button></div>`;
+      div.innerHTML=`${i.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(i.nombre)}</strong></div><div class="sub">${i._isService?'Servicio de membresía':'Producto'} · ${money(i.precio)} x ${i.qty}</div></div><div><button class="btn small" onclick="Ventas.delItem(${idx})">✕</button></div>`;
       c.appendChild(div);
     });
     Ventas.updateTotals();
