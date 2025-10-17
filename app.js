@@ -308,7 +308,7 @@ const Ventas={
     const wrap=document.getElementById('ventaResultados'); wrap.innerHTML='';
     res.forEach(p=>{
       const div=document.createElement('div'); div.className='list-item';
-      div.innerHTML=`<div style="flex:1"><div><strong>${esc(p.nombre)}</strong> <small>(${esc(p.sku)})</small></div><div class="sub">Precio: ${money(p.precio)} • Stock: ${p.stock}</div></div><div><input type="number" min="1" step="1" value="1" style="width:70px"> <button class="btn small">➕</button></div>`;
+      div.innerHTML=`${p.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(p.nombre)}</strong> <small>(${esc(p.sku)})</small></div><div class="sub">Precio: ${money(p.precio)} • Stock: ${p.stock}</div></div><div><input type="number" min="1" step="1" value="1" style="width:70px"> <button class="btn small">➕</button></div>`;
       div.querySelector('button').onclick=()=>{const qty=parseInt(div.querySelector('input').value||'1',10); Ventas.addCarrito(p.sku,qty)};
       wrap.appendChild(div);
     });
@@ -353,7 +353,7 @@ const Ventas={
     c.innerHTML='';
     Ventas.carrito.forEach((i,idx)=>{
       const div=document.createElement('div'); div.className='list-item';
-      div.innerHTML=`<div style="flex:1"><div><strong>${esc(i.nombre)}</strong></div><div class="sub">${i._isService?'Servicio de membresía':'Producto'} · ${money(i.precio)} x ${i.qty}</div></div><div><button class="btn small" onclick="Ventas.delItem(${idx})">✕</button></div>`;
+      div.innerHTML=`${p.img?`<img src='${p.img}' class='thumb' alt=''>`:''}<div style="flex:1"><div><strong>${esc(i.nombre)}</strong></div><div class="sub">${i._isService?'Servicio de membresía':'Producto'} · ${money(i.precio)} x ${i.qty}</div></div><div><button class="btn small" onclick="Ventas.delItem(${idx})">✕</button></div>`;
       c.appendChild(div);
     });
     Ventas.updateTotals();
@@ -428,6 +428,10 @@ const Inventario={
     if(!sku||!nombre){alert('SKU y Nombre obligatorios.');return;}
     const p={sku,nombre,categoria:document.getElementById('prodCategoria').value.trim()||'General',precio:parseFloat(document.getElementById('prodPrecio').value||'0'),costo:parseFloat(document.getElementById('prodCosto').value||'0'),stock:parseInt(document.getElementById('prodStock').value||'0',10),img:this.imgData||'',descr:document.getElementById('prodDescr').value.trim()};
     let ex=state.products.find(x=>x.sku===sku); if(ex)Object.assign(ex,p); else state.products.unshift(p);
+    // v4.6: persist image
+    if(ex){ if(Inventario.imgData){ ex.img=Inventario.imgData; } }
+    else { if(Inventario.imgData){ p.img=Inventario.imgData; } }
+    Inventario.imgData='';
     DB.save(state); this.renderTabla(); alert('Producto guardado.');
   },
   renderTabla(){
