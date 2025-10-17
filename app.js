@@ -545,7 +545,7 @@ const Clientes={
 };
 
 const Membresias={
-  init(){ this.fillClientes(); this.fillTipos(); },
+  init(){ this.fillClientes(); this.fillTipos(); this.renderTabla(); },
 
   manageTipos(){
     const m=document.getElementById('modalTipos');
@@ -604,7 +604,7 @@ const Membresias={
     state.memberships.unshift({id,cliente,tipo,inicio,fin,notas:(document.getElementById('memNotas').value||'')});
     DB.save(state);
     // Refrescar vistas
-    Historial.renderTabla(); Tickets.render(venta); UI.show('ticket');
+    Historial.renderTabla(); Membresias.renderTabla(); Tickets.render(venta); UI.show('ticket');
     // Limpiar formulario para siguiente venta
     const busc=document.getElementById('memClienteSearch'); if(busc) busc.value='';
     const cid=document.getElementById('memClienteId'); if(cid) cid.value='';
@@ -701,7 +701,17 @@ const Membresias={
     Ventas.carrito=[{_isService:true,nombre:'Membresía '+m.tipo,precio:tinfo.precio,qty:1, mem:{tipo:m.tipo,inicio:m.inicio,fin:m.fin}}];
     Ventas.renderCarrito();
   },
-  exportCSV(){
+  renderTabla(){
+  const tbody=document.getElementById('memTabla');
+  if(!tbody) return;
+  const list=state.memberships||[];
+  tbody.innerHTML = list.map(m=>{
+    const cname=(state.customers.find(c=>c.id===m.cliente)?.nombre)||'';
+    const st = Membresias.status?Membresias.status(m):'';
+    return `<tr><td>${esc(cname)}</td><td>${esc(m.tipo||'')}</td><td>${m.inicio||''}</td><td>${m.fin||''}</td><td>${st||''}</td><td>${esc(m.notas||'')}</td></tr>`;
+  }).join('') || `<tr><td colspan="6">Sin registros</td></tr>`;
+},
+exportCSV(){
     const rows=[['ID','Cliente','Tipo','Inicio','Fin','Estado','Notas']].concat(state.memberships.map(m=>{
       const status=this.status(m);
       return [m.id,(state.customers.find(c=>c.id===m.cliente)?.nombre||''),m.tipo,m.inicio,m.fin,status,m.notas||''];
@@ -1085,4 +1095,26 @@ window.addEventListener('DOMContentLoaded',UI.init);
 
   console.log('Dinamita POS v4.3 helpers cargados');
 })();
-// === end v4.3 helpers ===
+// === end v4.3 helpers ===guardar(){
+  const cliente=document.getElementById('memClienteId').value;
+  if(!cliente){ alert('Selecciona un cliente válido'); return; }
+  const tipo=document.getElementById('memTipo').value;
+  const inicio=document.getElementById('memInicio').value;
+  const fin=document.getElementById('memFin').value;
+  const notas=(document.getElementById('memNotas').value||'');
+  const id='M'+Date.now().toString(36);
+  state.memberships.unshift({id,cliente,tipo,inicio,fin,notas});
+  DB.save(state);
+  Membresias.renderTabla();
+  // limpiar formulario
+  const busc=document.getElementById('memClienteSearch'); if(busc) busc.value='';
+  const cid=document.getElementById('memClienteId'); if(cid) cid.value='';
+  const notasEl=document.getElementById('memNotas'); if(notasEl) notasEl.value='';
+  const tipoSel=document.getElementById('memTipo'); if(tipoSel && tipoSel.options.length) tipoSel.selectedIndex=0;
+  const hoy=new Date().toISOString().slice(0,10);
+  const ini=document.getElementById('memInicio'); if(ini) ini.value=hoy;
+  const pag=document.getElementById('memPago'); if(pag) pag.value='efectivo';
+  Membresias.changeTipo();
+  alert('Membresía registrada.');
+},
+
